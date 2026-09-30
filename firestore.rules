@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: default-deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Test connection probe
+    match /test/{testId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    function isValidMarketplaceListing(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.category is string
+        && data.price is string && data.price.size() <= 100
+        && data.sellerName is string && data.sellerName.size() <= 150
+        && (!('description' in data) || (data.description is string && data.description.size() <= 3000))
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1048576))
+        && (!('sellerPhone' in data) || (data.sellerPhone is string && data.sellerPhone.size() <= 50))
+        && (!('sellerVillage' in data) || (data.sellerVillage is string && data.sellerVillage.size() <= 200))
+        && (!('quantity' in data) || (data.quantity is string && data.quantity.size() <= 100))
+        && (!('distanceKm' in data) || (data.distanceKm is number))
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 20))
+        && (!('ownerId' in data) || (data.ownerId is string && (!isSignedIn() || data.ownerId == request.auth.uid)))
+        && (!('createdAt' in data) || (data.createdAt is string));
+    }
+
+    match /marketplace_listings/{listingId} {
+      allow read: if true;
+      allow create: if isValidId(listingId) && isValidMarketplaceListing(incoming()) && (
+        !('ownerId' in incoming()) || !isSignedIn() || incoming().ownerId == request.auth.uid
+      );
+      allow update: if isSignedIn() && isValidId(listingId) && isValidMarketplaceListing(incoming()) && (
+        !('ownerId' in existing()) || existing().ownerId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && isValidId(listingId) && (
+        !('ownerId' in existing()) || existing().ownerId == request.auth.uid
+      );
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isSignedIn() && (request.auth.uid == userId);
+    }
+
+    // Farmer profiles collection
+    match /farmer_profiles/{profileId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Crop analyses historical records
+    match /crop_analyses/{analysisId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+  }
+}
